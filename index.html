@@ -1,45 +1,80 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Habit Bandz Session Logs</title>
-  <style>
-    body { font-family: monospace; padding: 1rem; background: #111; color: #0f0; }
-    h1 { color: #0ff; }
-    pre { white-space: pre-wrap; word-break: break-word; }
-  </style>
-
-  <!-- Firebase SDKs -->
+  <title>Habit Bandz – Last 24h Activity</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js"></script>
   <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js"></script>
+  <style>
+    body { background: #111; color: #fff; font-family: sans-serif; padding: 2rem; }
+    canvas { background: #222; padding: 1rem; border-radius: 8px; }
+  </style>
 </head>
 <body>
-  <h1>📊 Habit Bandz Sessions</h1>
-  <pre id="output">Loading session data...</pre>
+  <h1>📈 Habit Bandz – Last 24h Event Activity</h1>
+  <canvas id="eventChart" width="600" height="300"></canvas>
 
   <script>
-    // ✅ Your Firebase config
+    // Firebase Config
     const firebaseConfig = {
       apiKey: "AIzaSyCRBO8speYo14mppTmPUkEFM6e_0APNJc0",
       authDomain: "habit-bandz-apple-watch.firebaseapp.com",
-      projectId: "habit-bandz-apple-watch",
-      storageBucket: "habit-bandz-apple-watch.appspot.com",
-      messagingSenderId: "1067690731758",
-      appId: "1:1067690731758:web:b4c51a31c27950d5316bff",
-      measurementId: "G-NBSHYJCDVS"
+      projectId: "habit-bandz-apple-watch"
     };
 
-    // ✅ Init
     const app = firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
-    // ✅ Query sessions from all users
-    db.collectionGroup("sessions").get().then(snapshot => {
-      const sessions = [];
-      snapshot.forEach(doc => sessions.push(doc.data()));
-      document.getElementById("output").textContent = JSON.stringify(sessions, null, 2);
-    }).catch(err => {
-      document.getElementById("output").textContent = "❌ Error: " + err.message;
+    const userId = "d3OIzg1IAdMO57MYjs2I0RQUeGG2";
+    const outputCounts = new Array(24).fill(0); // Hourly bucket
+    const now = new Date();
+    const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+
+    // Fetch sessions for that user
+    db.collection(`users/${userId}/sessions`).get().then(snapshot => {
+      snapshot.forEach(doc => {
+        const session = doc.data();
+        const events = session.events || [];
+
+        events.forEach(event => {
+          const timestamp = new Date(event.timestamp);
+          if (timestamp > cutoff) {
+            const hourAgo = 23 - Math.floor((now - timestamp) / (60 * 60 * 1000));
+            if (hourAgo >= 0 && hourAgo < 24) {
+              outputCounts[hourAgo]++;
+            }
+          }
+        });
+      });
+
+      renderChart(outputCounts);
     });
+
+    function renderChart(counts) {
+      const ctx = document.getElementById("eventChart").getContext("2d");
+      new Chart(ctx, {
+        type: "bar",
+        data: {
+          labels: [...Array(24)].map((_, i) => `${24 - i}h ago`),
+          datasets: [{
+            label: "Event count",
+            data: counts,
+            backgroundColor: "rgba(0, 255, 255, 0.6)",
+            borderColor: "#0ff",
+            borderWidth: 1
+          }]
+        },
+        options: {
+          scales: {
+            y: { beginAtZero: true },
+            x: { ticks: { color: "#ccc" } },
+          },
+          plugins: {
+            legend: { labels: { color: "#fff" } }
+          }
+        }
+      });
+    }
   </script>
 </body>
 </html>
