@@ -1,73 +1,122 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Habit Bandz – Last 24h Activity</title>
+  <title>Habit Bandz – Activity Summary</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-app.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore-compat.js"></script>
   <style>
     body { background: #111; color: #fff; font-family: sans-serif; padding: 2rem; }
-    canvas { background: #222; padding: 1rem; border-radius: 8px; }
+    canvas { background: #222; padding: 1rem; border-radius: 8px; margin-bottom: 2rem; }
+    h2 { margin-top: 2rem; }
   </style>
 </head>
 <body>
-  <h1>📈 Habit Bandz – Last 24h Event Activity</h1>
-  <canvas id="eventChart" width="600" height="300"></canvas>
+  <h1>📊 Habit Bandz – Activity Summary</h1>
+  <h2>⏱️ Events in the Past Hour</h2>
+  <canvas id="chartHour" width="600" height="300"></canvas>
+  <h2>Last 24 Hours</h2>
+  <canvas id="chartDay" width="600" height="300"></canvas>
+  <h2>Last 7 Days</h2>
+  <canvas id="chartWeek" width="600" height="300"></canvas>
+  <h2>Last 30 Days</h2>
+  <canvas id="chartMonth" width="600" height="300"></canvas>
 
   <script>
-    // Firebase Config
     const firebaseConfig = {
       apiKey: "AIzaSyCRBO8speYo14mppTmPUkEFM6e_0APNJc0",
       authDomain: "habit-bandz-apple-watch.firebaseapp.com",
       projectId: "habit-bandz-apple-watch"
     };
 
-    const app = firebase.initializeApp(firebaseConfig);
+    firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
-
     const userId = "d3OIzg1IAdMO57MYjs2I0RQUeGG2";
-    const outputCounts = new Array(24).fill(0); // Hourly bucket
-    const now = new Date();
-    const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
 
-    // Fetch sessions for that user
     db.collection(`users/${userId}/sessions`).get().then(snapshot => {
-      snapshot.forEach(doc => {
-        const session = doc.data();
-        const events = session.events || [];
+      const now = new Date();
 
+      const estFormatter = new Intl.DateTimeFormat('en-US', {
+        timeZone: 'America/New_York',
+        weekday: 'short',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        year: 'numeric', month: '2-digit', day: '2-digit'
+      });
+      const getEST = ts => new Date(ts.toLocaleString('en-US', { timeZone: 'America/New_York' }));
+
+      const today = getEST(now);
+      today.setHours(0, 0, 0, 0);
+
+      const weekStart = new Date(today.getTime() - 6 * 24 * 60 * 60 * 1000);
+      const monthStart = new Date(today.getTime() - 29 * 24 * 60 * 60 * 1000);
+      const hourStart = new Date(now.getTime() - 60 * 60 * 1000);
+
+      const dayBins = new Array(24).fill(0);
+      const weekBins = new Array(7).fill(0);
+      const monthBins = new Array(30).fill(0);
+      const hourBins = new Array(60).fill(0);
+
+      snapshot.forEach(doc => {
+        const events = doc.data().events || [];
         events.forEach(event => {
-          const timestamp = new Date(event.timestamp);
-          if (timestamp > cutoff) {
-            const hourAgo = 23 - Math.floor((now - timestamp) / (60 * 60 * 1000));
-            if (hourAgo >= 0 && hourAgo < 24) {
-              outputCounts[hourAgo]++;
-            }
+          const ts = event.timestamp?.toDate?.() ?? new Date(event.timestamp);
+          const est = getEST(ts);
+          const dur = parseFloat(event.duration ?? 0);
+
+          const hour = est.getHours();
+          const dayIndex = Math.floor((today.getTime() - est.setHours(0, 0, 0, 0)) / (24 * 60 * 60 * 1000));
+          const daysAgo = Math.floor((today.getTime() - est.getTime()) / (24 * 60 * 60 * 1000));
+
+          if (est >= today) dayBins[hour] += dur;
+          if (est >= weekStart && daysAgo < 7) weekBins[6 - daysAgo] += dur;
+          if (est >= monthStart && daysAgo < 30) monthBins[29 - daysAgo] += dur;
+
+          if (ts >= hourStart) {
+            const minsAgo = Math.floor((now - ts) / (60 * 1000));
+            const minIndex = 59 - minsAgo;
+            if (minIndex >= 0 && minIndex < 60) hourBins[minIndex] += dur;
           }
         });
       });
 
-      renderChart(outputCounts);
+      const dayLabels = [...Array(24)].map((_, i) => {
+        const hour = i % 12 === 0 ? 12 : i % 12;
+        const ampm = i < 12 ? "AM" : "PM";
+        return `${hour} ${ampm}`;
+      });
+
+      const weekdayLabels = (() => {
+        const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+        const todayIndex = getEST(new Date()).getDay();
+        return [...Array(7)].map((_, i) => days[(todayIndex - 6 + i + 7) % 7]);
+      })();
+
+      const hourLabels = [...Array(60)].map((_, i) => `${59 - i}m ago`);
+
+      renderChart("chartHour", hourBins, hourLabels, "Duration per Minute (s)");
+      renderChart("chartDay", dayBins, dayLabels, "Total Duration (s)");
+      renderChart("chartWeek", weekBins, weekdayLabels, "Total Duration (s)");
+      renderChart("chartMonth", monthBins, [...Array(30)].map((_, i) => `${30 - i}d ago`), "Total Duration (s)");
     });
 
-    function renderChart(counts) {
-      const ctx = document.getElementById("eventChart").getContext("2d");
-      new Chart(ctx, {
+    function renderChart(canvasId, data, labels, label) {
+      new Chart(document.getElementById(canvasId).getContext("2d"), {
         type: "bar",
         data: {
-          labels: [...Array(24)].map((_, i) => `${24 - i}h ago`),
+          labels: labels,
           datasets: [{
-            label: "Event count",
-            data: counts,
+            label: label,
+            data: data,
             backgroundColor: "rgba(0, 255, 255, 0.6)",
             borderColor: "#0ff",
             borderWidth: 1
           }]
         },
         options: {
+          responsive: true,
           scales: {
             y: { beginAtZero: true },
-            x: { ticks: { color: "#ccc" } },
+            x: { ticks: { color: "#ccc" } }
           },
           plugins: {
             legend: { labels: { color: "#fff" } }
